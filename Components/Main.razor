@@ -1,0 +1,331 @@
+@using System.IO
+@inject ReplayMonitorService Monitor
+@inject BallchasingClient Client
+@inject SettingsService Settings
+
+<div class="header">
+    <div class="title">Suket's AutoReplayUploader</div>
+    <div class="stats">
+        @if (RateInfo != null)
+        {
+            <span style="font-size: 0.8rem; color: var(--text-secondary);">
+                Remaining: @RateInfo.RemainingDay/d | @RateInfo.RemainingWeek/w
+            </span>
+        }
+        <button class="btn btn-primary" style="margin-left: 1rem;" @onclick="ToggleSettings">
+            @(ShowSettings ? "Back to List" : "Settings")
+        </button>
+    </div>
+</div>
+
+<div class="content">
+    @if (ShowSettings)
+    {
+        <div class="settings-panel glass">
+            <h2>Configuration</h2>
+            
+            <div class="form-group">
+                <label>Ballchasing API Key</label>
+                <input type="password" @bind="Settings.Current.ApiKey" placeholder="Enter API Key" />
+            </div>
+
+            <div class="form-group">
+                <label>Replay Folder</label>
+                <input type="text" @bind="Settings.Current.ReplayFolder" />
+            </div>
+
+            <div class="form-group">
+                <label>Visibility</label>
+                <select @bind="Settings.Current.Visibility">
+                    <option value="public">Public</option>
+                    <option value="private">Private</option>
+                    <option value="unlisted">Unlisted</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label>Polling Interval (minutes)</label>
+                <input type="number" @bind="Settings.Current.PollingInterval" />
+            </div>
+
+            <div class="form-group" style="flex-direction: row; align-items: center; gap: 1rem;">
+                <input type="checkbox" @bind="Settings.Current.AutoUpload" id="autoUpload" />
+                <label for="autoUpload">Enable Auto-Upload</label>
+                
+                <input type="checkbox" @bind="HideSuccessful" id="hideSuccess" />
+                <label for="hideSuccess">Auto-Hide Uploaded (3h)</label>
+            </div>
+
+            <div style="display: flex; gap: 1rem;">
+                <button class="btn btn-primary" @onclick="SaveSettings">Save & Apply</button>
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="top-actions" style="margin-bottom: 1.5rem; display: flex; gap: 1rem; align-items: center;">
+            <button class="btn glass" @onclick="ManualAddReplay">Add Replay File...</button>
+            <button class="btn glass" @onclick="HideAllSelected">Hide Selected</button>
+            <button class="btn glass" @onclick="RefreshFolder">Refresh</button>
+        </div>
+
+        <div class="replay-list" style="margin-bottom: 100px;">
+            @foreach (var replay in Monitor.Replays
+                .Where(r => !IsHidden(r) && !IsAutoHidden(r))
+                .OrderByDescending(r => r.DateCreated))
+            {
+                <div class="replay-card glass @(replay.IsSelected ? "selected" : "")" @onclick="() => ToggleSelection(replay)">
+                    <div style="display: flex; align-items: center;">
+                        <input type="checkbox" @bind="replay.IsSelected" @onclick:stopPropagation />
+                    </div>
+                    <div class="replay-info">
+                        <div style="font-weight: 600;">@replay.FileName</div>
+                        <div class="replay-meta">
+                            <span>@replay.DateCreated.ToString("g")</span>
+                        </div>
+                    </div>
+                    <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 0.25rem;">
+                        <div class="status-badge status-@replay.Status.ToString().ToLower()">
+                            @replay.Status
+                        </div>
+                        @if (replay.Status == UploadStatus.Failed && !string.IsNullOrEmpty(replay.ConflictUrl))
+                        {
+                            <a class="conflict-link" href="@replay.ConflictUrl" target="_blank" @onclick:stopPropagation>View Online</a>
+                        }
+                    </div>
+                    <div style="display: flex; gap: 0.5rem;" @onclick:stopPropagation>
+                        <button class="btn glass" @onclick="() => UploadReplay(replay)" disabled="@(replay.Status == UploadStatus.Uploading || replay.Status == UploadStatus.Retrying)">
+                            Upload
+                        </button>
+                        <button class="btn glass" @onclick="() => HideReplay(replay)" title="Hide Replay">×</button>
+                    </div>
+                </div>
+            }
+        </div>
+
+        <div class="bottom-bar glass">
+            <div class="auto-upload-status">
+                @if (Settings.Current.AutoUpload)
+                {
+                    <div class="timer">Next check in: <span class="time">@FormatTime(SecondsUntilNextCheck)</span></div>
+                }
+                else
+                {
+                    <div class="timer disabled">Auto-upload is disabled</div>
+                }
+            </div>
+            <button class="btn btn-primary" @onclick="UploadAllSelected">Upload Selected Now</button>
+        </div>
+    }
+</div>
+
+<style>
+    .bottom-bar {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        padding: 1.5rem 2rem;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        border-top: 1px solid rgba(255, 255, 255, 0.1);
+        z-index: 100;
+    }
+
+    .timer {
+        font-size: 0.9rem;
+        color: var(--text-secondary);
+    }
+
+    .timer .time {
+        color: var(--accent-color);
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+    }
+
+    .timer.disabled {
+        opacity: 0.5;
+    }
+</style>
+
+@code {
+    private bool ShowSettings = false;
+    private bool HideSuccessful = true;
+    private RateLimitInfo? RateInfo;
+    private System.Threading.Timer? AppTimer;
+    private int SecondsUntilNextCheck = 0;
+
+    protected override void OnInitialized()
+    {
+        Monitor.ReplaysChanged += () => InvokeAsync(StateHasChanged);
+        Client.RateLimitUpdated += (info) => { RateInfo = info; InvokeAsync(StateHasChanged); };
+        
+        Monitor.OnNewReplayDiscovered += HandleNewReplay;
+
+        // Initial configuration
+        Client.Configure(Settings.Current.ApiKey, Settings.Current.Visibility);
+        ResetTimer();
+        Monitor.StartMonitoring(Settings.Current.ReplayFolder, Settings.Current.PollingInterval);
+
+        // Global app timer (1s tick)
+        AppTimer = new System.Threading.Timer(_ => Tick(), null, 1000, 1000);
+    }
+
+    private void Tick()
+    {
+        if (Settings.Current.AutoUpload)
+        {
+            SecondsUntilNextCheck--;
+            if (SecondsUntilNextCheck <= 0)
+            {
+                _ = InvokeAsync(RefreshFolder);
+                ResetTimer();
+            }
+        }
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void ResetTimer()
+    {
+        SecondsUntilNextCheck = Settings.Current.PollingInterval * 60;
+    }
+
+    private string FormatTime(int totalSeconds)
+    {
+        if (totalSeconds < 0) totalSeconds = 0;
+        var minutes = totalSeconds / 60;
+        var seconds = totalSeconds % 60;
+        return $"{minutes}:{seconds:D2}";
+    }
+
+    private void HandleNewReplay(ReplayFile replay)
+    {
+        if (Settings.Current.AutoUpload && !IsHidden(replay))
+        {
+            _ = InvokeAsync(() => UploadReplay(replay));
+        }
+    }
+
+    private bool IsHidden(ReplayFile replay) => Settings.Current.HiddenReplays.Contains(replay.FullPath);
+
+    private bool IsAutoHidden(ReplayFile replay)
+    {
+        if (!HideSuccessful || replay.Status != UploadStatus.Success || replay.UploadTime == null) return false;
+        return (DateTime.Now - replay.UploadTime.Value).TotalHours >= 3;
+    }
+
+    private void ToggleSelection(ReplayFile replay)
+    {
+        replay.IsSelected = !replay.IsSelected;
+    }
+
+    private void HideReplay(ReplayFile replay)
+    {
+        if (!Settings.Current.HiddenReplays.Contains(replay.FullPath))
+        {
+            Settings.Current.HiddenReplays.Add(replay.FullPath);
+            Settings.Save();
+        }
+    }
+
+    private void HideAllSelected()
+    {
+        foreach (var replay in Monitor.Replays.Where(r => r.IsSelected))
+        {
+            HideReplay(replay);
+        }
+    }
+
+    private void ManualAddReplay()
+    {
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Filter = "Rocket League Replays (*.replay)|*.replay",
+            Title = "Select Replay File"
+        };
+
+        if (dialog.ShowDialog() == true)
+        {
+            var sourcePath = dialog.FileName;
+            var destPath = Path.Combine(Settings.Current.ReplayFolder, Path.GetFileName(sourcePath));
+
+            try
+            {
+                // If the file was hidden, unhide it
+                if (Settings.Current.HiddenReplays.Contains(destPath))
+                {
+                    Settings.Current.HiddenReplays.Remove(destPath);
+                    Settings.Save();
+                }
+
+                if (sourcePath != destPath)
+                {
+                    File.Copy(sourcePath, destPath, true);
+                }
+                
+                RefreshFolder();
+            }
+            catch (Exception ex)
+            {
+                App.Current?.Dispatcher.Invoke(() => System.Windows.MessageBox.Show($"Failed to add replay: {ex.Message}"));
+            }
+        }
+    }
+
+    private void ToggleSettings() => ShowSettings = !ShowSettings;
+
+    private void SaveSettings()
+    {
+        Settings.Save();
+        Client.Configure(Settings.Current.ApiKey, Settings.Current.Visibility);
+        ResetTimer();
+        Monitor.StartMonitoring(Settings.Current.ReplayFolder, Settings.Current.PollingInterval);
+        ShowSettings = false;
+    }
+
+    private void RefreshFolder()
+    {
+        Monitor.StartMonitoring(Settings.Current.ReplayFolder, Settings.Current.PollingInterval);
+    }
+
+    private async Task UploadReplay(ReplayFile replay)
+    {
+        if (replay.Status == UploadStatus.Uploading || replay.Status == UploadStatus.Retrying) return;
+
+        replay.Status = UploadStatus.Uploading;
+        StateHasChanged();
+
+        var result = await Client.UploadReplayAsync(replay.FullPath, (retry) => 
+        {
+            replay.Status = UploadStatus.Retrying;
+            replay.Message = $"Retrying ({retry}/3)...";
+            InvokeAsync(StateHasChanged);
+        });
+        
+        if (result.Success)
+        {
+            replay.Status = UploadStatus.Success;
+            replay.UploadTime = DateTime.Now;
+            try { File.Delete(replay.FullPath); } catch { }
+        }
+        else
+        {
+            replay.Status = UploadStatus.Failed;
+            replay.Message = result.Message;
+            replay.ConflictUrl = result.Location;
+        }
+        
+        StateHasChanged();
+    }
+
+    private async Task UploadAllSelected()
+    {
+        ResetTimer(); // Reset timer when manual upload is triggered
+        var toUpload = Monitor.Replays.Where(r => r.IsSelected && r.Status != UploadStatus.Success).ToList();
+        foreach (var replay in toUpload)
+        {
+            await UploadReplay(replay);
+        }
+    }
+}
