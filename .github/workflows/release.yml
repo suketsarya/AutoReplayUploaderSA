@@ -57,6 +57,7 @@ jobs:
             exit 1
         }
         Write-Host "Release $tag does not exist. Proceeding."
+        exit 0
 
   build_and_package:
     name: Build & Package
