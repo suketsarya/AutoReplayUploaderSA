@@ -76,7 +76,7 @@ jobs:
         dotnet-version: '10.0.x'
 
     - name: Publish
-      run: dotnet publish SuketAutoReplayUploader.csproj -p:PublishProfile=Properties/PublishProfiles/SingleFileProfile.pubxml -o publish_output
+      run: dotnet publish SuketAutoReplayUploader.csproj -o publish_output
 
     - name: Generate Installer Script
       shell: pwsh
