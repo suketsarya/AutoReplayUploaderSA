@@ -1,6 +1,6 @@
 [Setup]
 AppName=AutoReplayUploaderSA
-AppVersion=0.1.0
+AppVersion=0.1.1
 AppPublisher=Suket
 ; Default installation directory to LocalAppData so admin rights aren't needed
 DefaultDirName={localappdata}\AutoReplayUploaderSA

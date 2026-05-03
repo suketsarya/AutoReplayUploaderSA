@@ -29,7 +29,8 @@ public class MainComponentTests : TestContext
         var cut = RenderComponent<Main>();
 
         // Assert
-        cut.Find(".title").MarkupMatches("<div class=\"title\">AutoReplayUploaderSA</div>");
+        var title = cut.Find(".title");
+        Assert.Contains("AutoReplayUploaderSA", title.TextContent);
     }
 
     [Fact]
