@@ -2,12 +2,13 @@ name: Release
 
 on:
   push:
-    branches: [ "master" ]
+    tags:
+      - 'v*'
 
 jobs:
-  build:
+  test:
+    name: Run Tests
     runs-on: windows-latest
-
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
@@ -15,9 +16,17 @@ jobs:
     - name: Setup .NET
       uses: actions/setup-dotnet@v4
       with:
-        dotnet-version: '10.0.x' # Using the latest 10.0 SDK
+        dotnet-version: '10.0.x'
+        
     - name: Run Tests
       run: dotnet test
+
+  validate:
+    name: Validate Version & Release
+    runs-on: windows-latest
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
 
     - name: Check if release already exists
       shell: pwsh
@@ -68,14 +77,43 @@ jobs:
         
         Write-Host "Version matches: $tag"
 
-    - name: Publish
+  build_and_package:
+    name: Build & Package
+    needs: [test, validate]
+    runs-on: windows-latest
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
 
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '10.0.x'
+
+    - name: Publish
       run: dotnet publish SuketAutoReplayUploader.csproj -p:PublishProfile=Properties/PublishProfiles/SingleFileProfile.pubxml
 
     - name: Compile Installer
       run: |
         choco install innosetup
         iscc installer.iss
+
+    - name: Upload Installer Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: installer-executable
+        path: Output/AutoReplayUploaderSA_Setup.exe
+
+  release:
+    name: Create GitHub Release
+    needs: build_and_package
+    runs-on: ubuntu-latest
+    steps:
+    - name: Download Installer Artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: installer-executable
+        path: Output
 
     - name: Create Release
       uses: softprops/action-gh-release@v2
