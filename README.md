@@ -1,4 +1,4 @@
-# AutoReplayUploaderSA `v0.1.0`
+# sushiAutoReplayUploader `v0.1.0`
 
 A modern, standalone desktop application for Rocket League players to automatically track and upload their replays to **Ballchasing.com**. Built with .NET 10.0 and Blazor Hybrid (WPF), it offers a premium, high-performance experience without the need for BakkesMod.
 
@@ -39,7 +39,7 @@ You can customize the following settings to match your workflow:
 ## Installation
 
 This application is distributed as a convenient installer.
-1. Download the `AutoReplayUploaderSA_Setup.exe` from the [Releases](https://github.com/YOUR_USERNAME/Suket-AutoReplayUploader/releases) page.
+1. Download the `sushiAutoReplayUploader_Setup.exe` from the [Releases](https://github.com/YOUR_USERNAME/Suket-AutoReplayUploader/releases) page.
 2. Run the installer to automatically set up the application and its dependencies on your machine.
 3. The installer includes an option to create a desktop shortcut for easy access.
 

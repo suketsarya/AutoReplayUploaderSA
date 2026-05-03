@@ -30,7 +30,7 @@ public class MainComponentTests : TestContext
 
         // Assert
         var title = cut.Find(".title");
-        Assert.Contains("AutoReplayUploaderSA", title.TextContent);
+        Assert.Contains("sushiAutoReplayUploader", title.TextContent);
     }
 
     [Fact]

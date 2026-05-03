@@ -81,15 +81,15 @@ jobs:
         $version = "${{ needs.validate.outputs.version }}"
         $issContent = @"
         [Setup]
-        AppName=AutoReplayUploaderSA
+        AppName=sushiAutoReplayUploader
         AppVersion=$version
         AppPublisher=Suket
-        DefaultDirName={localappdata}\AutoReplayUploaderSA
-        DefaultGroupName=AutoReplayUploaderSA
+        DefaultDirName={localappdata}\sushiAutoReplayUploader
+        DefaultGroupName=sushiAutoReplayUploader
         DisableDirPage=no
         DisableProgramGroupPage=no
         OutputDir=Output
-        OutputBaseFilename=AutoReplayUploaderSA_Setup
+        OutputBaseFilename=sushiAutoReplayUploader_Setup
         Compression=lzma
         SolidCompression=yes
         PrivilegesRequired=lowest
@@ -103,11 +103,11 @@ jobs:
         Source: "bin\Release\net10.0-windows\publish\win-x64\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
         [Icons]
-        Name: "{group}\AutoReplayUploaderSA"; Filename: "{app}\SuketAutoReplayUploader.exe"
-        Name: "{autodesktop}\AutoReplayUploaderSA"; Filename: "{app}\SuketAutoReplayUploader.exe"; Tasks: desktopicon
+        Name: "{group}\sushiAutoReplayUploader"; Filename: "{app}\SuketAutoReplayUploader.exe"
+        Name: "{autodesktop}\sushiAutoReplayUploader"; Filename: "{app}\SuketAutoReplayUploader.exe"; Tasks: desktopicon
 
         [Run]
-        Filename: "{app}\SuketAutoReplayUploader.exe"; Description: "{cm:LaunchProgram,AutoReplayUploaderSA}"; Flags: nowait postinstall skipifsilent
+        Filename: "{app}\SuketAutoReplayUploader.exe"; Description: "{cm:LaunchProgram,sushiAutoReplayUploader}"; Flags: nowait postinstall skipifsilent
         "@
         Set-Content -Path "installer.iss" -Value $issContent
 
@@ -120,7 +120,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: installer-executable
-        path: Output/AutoReplayUploaderSA_Setup.exe
+        path: Output/sushiAutoReplayUploader_Setup.exe
 
   release:
     name: Create GitHub Release
@@ -138,6 +138,6 @@ jobs:
       with:
         tag_name: "v${{ needs.validate.outputs.version }}"
         name: "Release v${{ needs.validate.outputs.version }}"
-        files: Output/AutoReplayUploaderSA_Setup.exe
+        files: Output/sushiAutoReplayUploader_Setup.exe
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
