@@ -1,0 +1,86 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '10.0.x' # Using the latest 10.0 SDK
+    - name: Run Tests
+      run: dotnet test
+
+    - name: Check if release already exists
+      shell: pwsh
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        $tag = $env:GITHUB_REF_NAME
+        Write-Host "Checking if release $tag already exists..."
+        $releaseExists = gh release view $tag 2>$null | Out-String
+        if ($LASTEXITCODE -eq 0) {
+            Write-Error "A release for $tag already exists! Please update the version in your code and push a new tag."
+            exit 1
+        }
+        Write-Host "Release $tag does not exist. Proceeding."
+
+    - name: Verify Version Match
+      shell: pwsh
+      run: |
+        $tag = $env:GITHUB_REF -replace 'refs/tags/v', ''
+        
+        # Check csproj version
+        $csprojContent = Get-Content SuketAutoReplayUploader.csproj
+        $versionMatch = $csprojContent | Select-String '<Version>(.*)</Version>'
+        if ($versionMatch) {
+            $projectVersion = $versionMatch.Matches.Groups[1].Value
+            if ($projectVersion -ne $tag) {
+                Write-Error "Version mismatch! Tag is v$tag but csproj Version is $projectVersion"
+                exit 1
+            }
+        } else {
+            Write-Error "Could not find <Version> in csproj"
+            exit 1
+        }
+        
+        # Check installer version
+        $issContent = Get-Content installer.iss
+        $issMatch = $issContent | Select-String 'AppVersion=(.*)'
+        if ($issMatch) {
+            $issVersion = $issMatch.Matches.Groups[1].Value
+            if ($issVersion -ne $tag) {
+                Write-Error "Version mismatch! Tag is v$tag but installer.iss AppVersion is $issVersion"
+                exit 1
+            }
+        } else {
+            Write-Error "Could not find AppVersion in installer.iss"
+            exit 1
+        }
+        
+        Write-Host "Version matches: $tag"
+
+    - name: Publish
+
+      run: dotnet publish SuketAutoReplayUploader.csproj -p:PublishProfile=Properties/PublishProfiles/SingleFileProfile.pubxml
+
+    - name: Compile Installer
+      run: |
+        choco install innosetup
+        iscc installer.iss
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v2
+      with:
+        files: Output/AutoReplayUploaderSA_Setup.exe
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

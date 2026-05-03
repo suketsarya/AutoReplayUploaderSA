@@ -14,7 +14,10 @@ public class ReplayMonitorServiceTests : IDisposable
     {
         _testDir = Path.Combine(Path.GetTempPath(), "SuketUploaderTests_" + Guid.NewGuid());
         Directory.CreateDirectory(_testDir);
-        _service = new ReplayMonitorService();
+        
+        var settingsFile = Path.Combine(_testDir, "settings.json");
+        var settings = new SettingsService(settingsFile);
+        _service = new ReplayMonitorService(settings);
     }
 
     [Fact]
@@ -47,22 +50,6 @@ public class ReplayMonitorServiceTests : IDisposable
 
         // Assert
         Assert.Contains(_service.Replays, r => r.FileName == "new.replay");
-    }
-
-    [Fact]
-    public void HiddenFilePaths_AreRespected()
-    {
-        // Arrange
-        var filePath = Path.Combine(_testDir, "hidden.replay");
-        File.WriteAllText(filePath, "dummy content");
-        var hiddenPaths = new HashSet<string> { filePath };
-
-        // Act
-        _service.StartMonitoring(_testDir, 1, hiddenPaths: hiddenPaths);
-
-        // Assert
-        Assert.Single(_service.Replays);
-        Assert.True(_service.Replays[0].IsHidden);
     }
 
     public void Dispose()

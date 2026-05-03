@@ -15,6 +15,7 @@ public interface IReplayMonitorService : IDisposable
     System.Collections.ObjectModel.ObservableCollection<ReplayFile> Replays { get; }
     event Action? ReplaysChanged;
     event Action<ReplayFile>? OnNewReplayDiscovered;
-    void StartMonitoring(string path, int intervalMinutes, DateTime? baselineDate = null, HashSet<string>? hiddenPaths = null);
+    void StartMonitoring(string path, int intervalMinutes, DateTime? baselineDate = null);
     void ForceAddReplay(string fullPath);
+    void Save();
 }

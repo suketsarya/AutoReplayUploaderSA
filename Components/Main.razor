@@ -108,22 +108,19 @@
     }
     else
     {
-        <div class="sticky-header">
+        <div class="sticky-header" style="display: flex; justify-content: space-between; align-items: center;">
             <div class="tabs">
                 <button class="tab-btn @(CurrentTab == ListTab.Pending ? "active" : "")" @onclick="() => CurrentTab = ListTab.Pending">
-                    Pending & Failed (@Monitor.Replays.Count(r => !r.IsHidden && r.Status != UploadStatus.Success))
+                    Pending & Failed (@Monitor.Replays.Count(r => r.Status != UploadStatus.Success))
                 </button>
                 <button class="tab-btn @(CurrentTab == ListTab.Uploaded ? "active" : "")" @onclick="() => CurrentTab = ListTab.Uploaded">
-                    Uploaded (@Monitor.Replays.Count(r => !r.IsHidden && r.Status == UploadStatus.Success))
-                </button>
-                <button class="tab-btn @(CurrentTab == ListTab.Hidden ? "active" : "")" @onclick="() => CurrentTab = ListTab.Hidden">
-                    Hidden (@Monitor.Replays.Count(r => r.IsHidden))
+                    Uploaded (@Monitor.Replays.Count(r => r.Status == UploadStatus.Success))
                 </button>
             </div>
 
             @if (CurrentTab == ListTab.Pending)
             {
-                <div class="top-actions" style="margin-top: 1rem; display: flex; gap: 1rem; align-items: center;">
+                <div class="top-actions" style="display: flex; gap: 1rem; align-items: center;">
                     <button class="btn glass" @onclick="ManualAddReplay">Add Replay File(s)...</button>
                     <button class="btn glass" @onclick="RefreshFolder">Refresh</button>
                 </div>
@@ -132,10 +129,10 @@
 
         <div class="replay-list">
             @foreach (var replay in Monitor.Replays
-                .Where(r => CurrentTab == ListTab.Hidden ? r.IsHidden : (!r.IsHidden && (CurrentTab == ListTab.Pending ? r.Status != UploadStatus.Success : r.Status == UploadStatus.Success)))
+                .Where(r => (CurrentTab == ListTab.Pending ? r.Status != UploadStatus.Success : r.Status == UploadStatus.Success))
                 .OrderByDescending(r => r.DateCreated))
             {
-                <div class="replay-card glass @(replay.IsSelected ? "selected" : "") @(ActiveDropdownId == $"replay-{replay.FullPath}" ? "active-dropdown" : "")" @onclick="() => ToggleSelection(replay)">
+                <div class="replay-card glass @(replay.IsSelected ? "selected" : "") @(ActiveDropdownId == $"replay-{replay.FullPath}" || ActiveDropdownId == $"delete-{replay.FullPath}" ? "active-dropdown" : "")" @onclick="() => ToggleSelection(replay)">
                     <div style="display: flex; align-items: center;">
                         <input type="checkbox" @bind="replay.IsSelected" @onclick:stopPropagation />
                     </div>
@@ -183,10 +180,16 @@
                                 }
                             </div>
                         }
-                        <button class="btn glass" @onclick="() => ToggleHideReplay(replay)" title="@(replay.IsHidden ? "Unhide" : "Hide")">
-                            @(replay.IsHidden ? "👁️" : "👁️‍🗨️")
-                        </button>
-                        <button class="btn glass" @onclick="() => RemoveFromList(replay)" title="Remove from list">×</button>
+                        <div style="position: relative;">
+                            <button class="btn glass" @onclick='() => ToggleDropdown($"delete-{replay.FullPath}")' title="Remove or Delete">×</button>
+                            @if (ActiveDropdownId == $"delete-{replay.FullPath}")
+                            {
+                                <div class="dropdown-menu" style="right: 0; top: 100%; margin-top: 4px;">
+                                    <div class="dropdown-item" @onclick="() => RemoveFromList(replay)">Remove from List</div>
+                                    <div class="dropdown-item" @onclick="() => DeleteFilePermanently(replay)" style="color: var(--error);">Delete</div>
+                                </div>
+                            }
+                        </div>
                     </div>
                 </div>
             }
@@ -206,7 +209,7 @@
                     }
                 </div>
                 @{
-                    var selectedCount = Monitor.Replays.Count(r => !r.IsHidden && r.IsSelected && r.Status != UploadStatus.Success && r.Status != UploadStatus.Conflict);
+                    var selectedCount = Monitor.Replays.Count(r => r.IsSelected && r.Status != UploadStatus.Success && r.Status != UploadStatus.Conflict);
                 }
                 <div style="position: relative;" title="@(IsLimitReached ? "Upload limit reached" : "")">
                     <div class="split-button @(selectedCount == 0 || IsLimitReached ? "disabled" : "")">
@@ -323,7 +326,7 @@
 </style>
 
 @code {
-    private enum ListTab { Pending, Uploaded, Hidden }
+    private enum ListTab { Pending, Uploaded }
     private ListTab CurrentTab = ListTab.Pending;
     private bool ShowSettings = false;
     private System.Threading.Timer? AppTimer;
@@ -349,7 +352,7 @@
         ResetTimer();
         ResetStatusTimer();
         var baseline = Settings.Current.LastUploadedReplayDate ?? DateTime.Now;
-        Monitor.StartMonitoring(Settings.Current.ReplayFolder, Settings.Current.PollingInterval, baseline, Settings.Current.HiddenFilePaths);
+        Monitor.StartMonitoring(Settings.Current.ReplayFolder, Settings.Current.PollingInterval, baseline);
 
         _ = UpdateApiStatus();
 
@@ -502,7 +505,7 @@
 
     private void HandleNewReplay(ReplayFile replay)
     {
-        if (Settings.Current.AutoUpload && !replay.IsHidden)
+        if (Settings.Current.AutoUpload)
         {
             _ = InvokeAsync(() => UploadReplay(replay));
         }
@@ -535,22 +538,40 @@
         replay.IsSelected = !replay.IsSelected;
     }
 
-    private void ToggleHideReplay(ReplayFile replay)
+    private void RemoveFromList(ReplayFile replay)
     {
-        replay.IsHidden = !replay.IsHidden;
-        if (replay.IsHidden)
-            Settings.Current.HiddenFilePaths.Add(replay.FullPath);
-        else
-            Settings.Current.HiddenFilePaths.Remove(replay.FullPath);
-        
+        ActiveDropdownId = null;
+        Settings.Current.ExcludedFilePaths.Add(replay.FullPath);
         Settings.Save();
+        Monitor.Replays.Remove(replay);
         StateHasChanged();
     }
 
-    private void RemoveFromList(ReplayFile replay)
+    private async Task DeleteFilePermanently(ReplayFile replay)
     {
-        Monitor.Replays.Remove(replay);
-        StateHasChanged();
+        ActiveDropdownId = null;
+        bool confirm = await Task.Run(() => {
+            return App.Current?.Dispatcher.Invoke<bool>(() => 
+                System.Windows.MessageBox.Show(
+                    $"Are you sure you want to permanently delete '{replay.FileName}' from your computer? This cannot be undone.",
+                    "Confirm Deletion",
+                    System.Windows.MessageBoxButton.YesNo,
+                    System.Windows.MessageBoxImage.Warning) == System.Windows.MessageBoxResult.Yes) ?? false;
+        });
+
+        if (confirm)
+        {
+            try 
+            {
+                if (File.Exists(replay.FullPath)) File.Delete(replay.FullPath);
+                Monitor.Replays.Remove(replay);
+            }
+            catch (Exception ex)
+            {
+                App.Current?.Dispatcher.Invoke(() => System.Windows.MessageBox.Show($"Failed to delete file: {ex.Message}"));
+            }
+            StateHasChanged();
+        }
     }
 
     private void ManualAddReplay()
@@ -593,7 +614,7 @@
         Client.Configure(Settings.Current.ApiKey, Settings.Current.Visibility);
         ResetTimer();
         var baseline = Settings.Current.LastUploadedReplayDate ?? DateTime.Now;
-        Monitor.StartMonitoring(Settings.Current.ReplayFolder, Settings.Current.PollingInterval, baseline, Settings.Current.HiddenFilePaths);
+        Monitor.StartMonitoring(Settings.Current.ReplayFolder, Settings.Current.PollingInterval, baseline);
         await UpdateApiStatus();
         ShowSettings = false;
     }
@@ -601,7 +622,7 @@
     private void RefreshFolder()
     {
         var baseline = Settings.Current.LastUploadedReplayDate ?? DateTime.Now;
-        Monitor.StartMonitoring(Settings.Current.ReplayFolder, Settings.Current.PollingInterval, baseline, Settings.Current.HiddenFilePaths);
+        Monitor.StartMonitoring(Settings.Current.ReplayFolder, Settings.Current.PollingInterval, baseline);
     }
 
     private async Task UploadReplay(ReplayFile replay, string? visibility = null)
@@ -619,12 +640,14 @@
         }
 
         replay.Status = UploadStatus.Uploading;
+        Monitor.Save();
         StateHasChanged();
 
         var result = await Client.UploadReplayAsync(replay.FullPath, visibility, (retry) => 
         {
             replay.Status = UploadStatus.Retrying;
             replay.Message = $"Retrying ({retry}/3)...";
+            Monitor.Save();
             InvokeAsync(StateHasChanged);
         });
         
@@ -641,6 +664,7 @@
                 Settings.Save();
             }
 
+            Monitor.Save();
             _ = UpdateApiStatus(); // Update quota after success
         }
         else
@@ -655,6 +679,7 @@
                 replay.Status = UploadStatus.Failed;
             }
             replay.Message = result.Message;
+            Monitor.Save();
         }
         
         StateHasChanged();
@@ -671,7 +696,7 @@
             return;
         }
 
-        var toUpload = Monitor.Replays.Where(r => !r.IsHidden && r.IsSelected && r.Status != UploadStatus.Success && r.Status != UploadStatus.Conflict).ToList();
+        var toUpload = Monitor.Replays.Where(r => r.IsSelected && r.Status != UploadStatus.Success && r.Status != UploadStatus.Conflict).ToList();
         foreach (var replay in toUpload)
         {
             await UploadReplay(replay, visibility);

@@ -11,6 +11,15 @@ namespace SuketAutoReplayUploader
 
         public App()
         {
+            AppDomain.CurrentDomain.UnhandledException += (s, e) => 
+                ShowError(e.ExceptionObject as Exception, "AppDomain Unhandled Exception");
+            
+            DispatcherUnhandledException += (s, e) => 
+            {
+                ShowError(e.Exception, "Dispatcher Unhandled Exception");
+                e.Handled = true;
+            };
+
             var serviceCollection = new ServiceCollection();
             serviceCollection.AddWpfBlazorWebView();
             
@@ -20,6 +29,12 @@ namespace SuketAutoReplayUploader
             serviceCollection.AddSingleton<IReplayMonitorService, ReplayMonitorService>();
 
             Services = serviceCollection.BuildServiceProvider();
+        }
+
+        private void ShowError(Exception? ex, string title)
+        {
+            var message = ex?.ToString() ?? "Unknown error";
+            MessageBox.Show(message, title, MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 }

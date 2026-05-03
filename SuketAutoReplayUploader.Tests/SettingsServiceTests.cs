@@ -44,22 +44,6 @@ public class SettingsServiceTests : IDisposable
         Assert.Equal("private", service2.Current.Visibility);
     }
 
-    [Fact]
-    public void HiddenFilePaths_ArePersisted()
-    {
-        // Arrange
-        var service = new SettingsService(_testFile);
-        var testPath = @"C:\Replays\test.replay";
-        service.Current.HiddenFilePaths.Add(testPath);
-
-        // Act
-        service.Save();
-        var service2 = new SettingsService(_testFile);
-
-        // Assert
-        Assert.Contains(testPath, service2.Current.HiddenFilePaths);
-    }
-
     public void Dispose()
     {
         if (File.Exists(_testFile)) File.Delete(_testFile);

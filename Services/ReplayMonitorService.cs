@@ -14,21 +14,31 @@ public class ReplayMonitorService : IReplayMonitorService
     private CancellationTokenSource? _cts;
     private DateTime? _baselineDate;
     private readonly HashSet<string> _forceVisibleFiles = new();
-    private HashSet<string> _hiddenPaths = new();
+    private readonly SettingsService _settings;
+    private readonly string _persistencePath;
+
+    public ReplayMonitorService(SettingsService settings)
+    {
+        _settings = settings;
+        var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        var appFolder = Path.Combine(appData, "SuketAutoReplayUploader");
+        _persistencePath = Path.Combine(appFolder, "replays.json");
+
+        _replays.CollectionChanged += (s, e) => SavePersistedReplays();
+    }
 
     public ObservableCollection<ReplayFile> Replays => _replays;
     public event Action? ReplaysChanged;
     public event Action<ReplayFile>? OnNewReplayDiscovered;
 
-    public void StartMonitoring(string path, int intervalMinutes, DateTime? baselineDate = null, HashSet<string>? hiddenPaths = null)
+    public void StartMonitoring(string path, int intervalMinutes, DateTime? baselineDate = null)
     {
         _watchPath = path;
         _baselineDate = baselineDate;
-        _hiddenPaths = hiddenPaths ?? new();
         
         if (!Directory.Exists(path)) return;
 
-        // Initial scan - mark existing files as seen so they don't show up
+        LoadPersistedReplays();
         ScanFolder(isInitial: true);
 
         // Setup Watcher
@@ -68,6 +78,8 @@ public class ReplayMonitorService : IReplayMonitorService
 
             foreach (var file in files)
             {
+                if (_settings.Current.ExcludedFilePaths.Contains(file)) continue;
+
                 if (!_replays.Any(r => r.FullPath == file))
                 {
                     var info = new FileInfo(file);
@@ -81,7 +93,11 @@ public class ReplayMonitorService : IReplayMonitorService
                 }
             }
 
-            if (changed) ReplaysChanged?.Invoke();
+            if (changed) 
+            {
+                SavePersistedReplays();
+                ReplaysChanged?.Invoke();
+            }
         };
 
         if (App.Current?.Dispatcher != null)
@@ -98,6 +114,7 @@ public class ReplayMonitorService : IReplayMonitorService
             if (replay != null)
             {
                 _replays.Remove(replay);
+                SavePersistedReplays();
                 ReplaysChanged?.Invoke();
             }
         };
@@ -115,8 +132,10 @@ public class ReplayMonitorService : IReplayMonitorService
 
         Action action = () => 
         {
+            if (_settings.Current.ExcludedFilePaths.Contains(fullPath)) return;
             if (_replays.Any(r => r.FullPath == fullPath)) return;
             InternalAddReplay(fullPath);
+            SavePersistedReplays();
             ReplaysChanged?.Invoke();
         };
 
@@ -128,6 +147,10 @@ public class ReplayMonitorService : IReplayMonitorService
 
     public void ForceAddReplay(string fullPath)
     {
+        if (_settings.Current.ExcludedFilePaths.Remove(fullPath))
+        {
+            _settings.Save();
+        }
         _forceVisibleFiles.Add(fullPath);
         AddReplay(fullPath);
     }
@@ -141,11 +164,44 @@ public class ReplayMonitorService : IReplayMonitorService
             FileName = info.Name,
             FullPath = fullPath,
             DateCreated = info.CreationTime,
-            Status = UploadStatus.Pending,
-            IsHidden = _hiddenPaths.Contains(fullPath)
+            Status = UploadStatus.Pending
         };
         _replays.Add(replay);
+        SavePersistedReplays();
         OnNewReplayDiscovered?.Invoke(replay);
+    }
+
+    private void LoadPersistedReplays()
+    {
+        if (!File.Exists(_persistencePath)) return;
+        try
+        {
+            var json = File.ReadAllText(_persistencePath);
+            var loaded = System.Text.Json.JsonSerializer.Deserialize<List<ReplayFile>>(json);
+            if (loaded != null)
+            {
+                foreach (var r in loaded)
+                {
+                    if (File.Exists(r.FullPath) && !_replays.Any(x => x.FullPath == r.FullPath))
+                    {
+                        _replays.Add(r);
+                    }
+                }
+            }
+        }
+        catch { }
+    }
+
+    public void Save() => SavePersistedReplays();
+
+    public void SavePersistedReplays()
+    {
+        try
+        {
+            var json = System.Text.Json.JsonSerializer.Serialize(_replays.ToList(), new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+            File.WriteAllText(_persistencePath, json);
+        }
+        catch { }
     }
 
     private async Task PollAsync(CancellationToken token)

@@ -36,11 +36,16 @@ You can customize the following settings to match your workflow:
 3. **Play**: Just keep the app running while you play Rocket League. Your replays will appear in the "Pending" tab and move to "Uploaded" automatically.
 4. **View Online**: Click the **"View Replay"** button on any successfully uploaded item to jump straight to the Ballchasing analysis page.
 
-## Installation (Standalone)
+## Installation
 
-This application is distributed as a **Self-Contained Single File**.
-- No .NET runtime installation required.
-- Just download the `AutoReplayUploaderSA.exe` from the [Releases](https://github.com/YOUR_USERNAME/Suket-AutoReplayUploader/releases) page and run it.
+This application is distributed as a convenient installer.
+1. Download the `AutoReplayUploaderSA_Setup.exe` from the [Releases](https://github.com/YOUR_USERNAME/Suket-AutoReplayUploader/releases) page.
+2. Run the installer to automatically set up the application and its dependencies on your machine.
+3. The installer includes an option to create a desktop shortcut for easy access.
+
+## Contribution
+
+Feel free to fork, raise a PR. If you have any feature requests, open an issue and I'll look into it. Also, feel free to open an issue for any bugs you find.
 
 ---
 *Note: This application is not affiliated with Psyonix or Ballchasing.com. It is an independent tool built for the Rocket League community.*

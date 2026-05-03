@@ -13,7 +13,7 @@ public class AppSettings
     public bool AutoDeleteEnabled { get; set; } = false;
     public int AutoDeleteMinutes { get; set; } = 180;
     public DateTime? LastUploadedReplayDate { get; set; }
-    public HashSet<string> HiddenFilePaths { get; set; } = new();
+    public HashSet<string> ExcludedFilePaths { get; set; } = new();
 }
 
 public class SettingsService
