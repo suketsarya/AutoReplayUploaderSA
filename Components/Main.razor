@@ -1,18 +1,37 @@
+@using System.Reflection
 @using System.IO
-@inject ReplayMonitorService Monitor
-@inject BallchasingClient Client
+@inject IReplayMonitorService Monitor
+@inject IBallchasingClient Client
 @inject SettingsService Settings
 
 <div class="header">
-    <div class="title">Suket's AutoReplayUploader</div>
-    <div class="stats">
-        @if (RateInfo != null)
+    <div class="title">
+    AutoReplayUploaderSA 
+    <span class="version">v@(Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "0.0.0")</span>
+</div>
+    <div class="header-right">
+        @if (Account != null && !ShowSettings)
         {
-            <span style="font-size: 0.8rem; color: var(--text-secondary);">
-                Remaining: @RateInfo.RemainingDay/d | @RateInfo.RemainingWeek/w
-            </span>
+            <div class="account-info">
+                <div class="account-name">@Account.Name</div>
+                <div class="account-type">@Account.Type Account</div>
+                <div class="account-quota">
+                    Quota: @Account.Quota.Day.Used/@(Account.Quota.Day.IsUnlimited ? "∞" : Account.Quota.Day.Max) (24h) | @Account.Quota.Week.Used/@(Account.Quota.Week.IsUnlimited ? "∞" : Account.Quota.Week.Max) (7d)
+                </div>
+            </div>
         }
-        <button class="btn btn-primary" style="margin-left: 1rem;" @onclick="ToggleSettings">
+        @if (!ShowSettings)
+        {
+            <div class="ballchasing-status" @onclick="ManualCheckStatus" title="Click to refresh status">
+                <div class="status-dot @GetStatusColorClass()"></div>
+                <span>@GetStatusText()</span>
+                @if (LastStatusCheck.HasValue)
+                {
+                    <span class="last-checked">@GetLastCheckedString()</span>
+                }
+            </div>
+        }
+        <button class="btn btn-primary" @onclick="ToggleSettings">
             @(ShowSettings ? "Back to List" : "Settings")
         </button>
     </div>
@@ -26,7 +45,25 @@
             
             <div class="form-group">
                 <label>Ballchasing API Key</label>
-                <input type="password" @bind="Settings.Current.ApiKey" placeholder="Enter API Key" />
+                <div style="display: flex; gap: 0.5rem;">
+                    <input type="@(ShowApiKey ? "text" : "password")" value="@Settings.Current.ApiKey" 
+                           @oninput="@(e => { Settings.Current.ApiKey = e.Value?.ToString() ?? ""; HasCheckedStatus = false; })"
+                           placeholder="Enter API Key" class="@(HasCheckedStatus ? GetInputStatusClass() : "")" style="flex: 1;" />
+                    <button class="btn glass" style="width: 80px;" @onclick="() => ShowApiKey = !ShowApiKey" title="@(ShowApiKey ? "Hide API Key" : "Show API Key")">
+                        @(ShowApiKey ? "Hide" : "Show")
+                    </button>
+                    <button class="btn glass" @onclick="ManualCheckStatus" disabled="@(CurrentApiStatus == BallchasingClient.ApiStatus.Checking)">
+                        Check
+                    </button>
+                </div>
+                @if (HasCheckedStatus && CurrentApiStatus == BallchasingClient.ApiStatus.Valid && Account != null)
+                {
+                    <div class="account-preview">✓ Account: @Account.Name</div>
+                }
+                @if (!string.IsNullOrEmpty(ApiRetryMessage))
+                {
+                    <div class="retry-indicator">@ApiRetryMessage</div>
+                }
             </div>
 
             <div class="form-group">
@@ -52,8 +89,16 @@
                 <input type="checkbox" @bind="Settings.Current.AutoUpload" id="autoUpload" />
                 <label for="autoUpload">Enable Auto-Upload</label>
                 
-                <input type="checkbox" @bind="HideSuccessful" id="hideSuccess" />
-                <label for="hideSuccess">Auto-Hide Uploaded (3h)</label>
+                <input type="checkbox" @bind="Settings.Current.AutoDeleteEnabled" id="autoDelete" />
+                <label for="autoDelete">Auto-Delete Uploaded</label>
+                
+                @if (Settings.Current.AutoDeleteEnabled)
+                {
+                    <div style="display: flex; align-items: center; gap: 0.5rem; margin-left: 1rem;">
+                        <input type="number" @bind="Settings.Current.AutoDeleteMinutes" style="width: 80px; padding: 0.4rem;" />
+                        <label>minutes</label>
+                    </div>
+                }
             </div>
 
             <div style="display: flex; gap: 1rem;">
@@ -63,18 +108,34 @@
     }
     else
     {
-        <div class="top-actions" style="margin-bottom: 1.5rem; display: flex; gap: 1rem; align-items: center;">
-            <button class="btn glass" @onclick="ManualAddReplay">Add Replay File...</button>
-            <button class="btn glass" @onclick="HideAllSelected">Hide Selected</button>
-            <button class="btn glass" @onclick="RefreshFolder">Refresh</button>
+        <div class="sticky-header">
+            <div class="tabs">
+                <button class="tab-btn @(CurrentTab == ListTab.Pending ? "active" : "")" @onclick="() => CurrentTab = ListTab.Pending">
+                    Pending & Failed (@Monitor.Replays.Count(r => !r.IsHidden && r.Status != UploadStatus.Success))
+                </button>
+                <button class="tab-btn @(CurrentTab == ListTab.Uploaded ? "active" : "")" @onclick="() => CurrentTab = ListTab.Uploaded">
+                    Uploaded (@Monitor.Replays.Count(r => !r.IsHidden && r.Status == UploadStatus.Success))
+                </button>
+                <button class="tab-btn @(CurrentTab == ListTab.Hidden ? "active" : "")" @onclick="() => CurrentTab = ListTab.Hidden">
+                    Hidden (@Monitor.Replays.Count(r => r.IsHidden))
+                </button>
+            </div>
+
+            @if (CurrentTab == ListTab.Pending)
+            {
+                <div class="top-actions" style="margin-top: 1rem; display: flex; gap: 1rem; align-items: center;">
+                    <button class="btn glass" @onclick="ManualAddReplay">Add Replay File(s)...</button>
+                    <button class="btn glass" @onclick="RefreshFolder">Refresh</button>
+                </div>
+            }
         </div>
 
-        <div class="replay-list" style="margin-bottom: 100px;">
+        <div class="replay-list">
             @foreach (var replay in Monitor.Replays
-                .Where(r => !IsHidden(r) && !IsAutoHidden(r))
+                .Where(r => CurrentTab == ListTab.Hidden ? r.IsHidden : (!r.IsHidden && (CurrentTab == ListTab.Pending ? r.Status != UploadStatus.Success : r.Status == UploadStatus.Success)))
                 .OrderByDescending(r => r.DateCreated))
             {
-                <div class="replay-card glass @(replay.IsSelected ? "selected" : "")" @onclick="() => ToggleSelection(replay)">
+                <div class="replay-card glass @(replay.IsSelected ? "selected" : "") @(ActiveDropdownId == $"replay-{replay.FullPath}" ? "active-dropdown" : "")" @onclick="() => ToggleSelection(replay)">
                     <div style="display: flex; align-items: center;">
                         <input type="checkbox" @bind="replay.IsSelected" @onclick:stopPropagation />
                     </div>
@@ -88,38 +149,99 @@
                         <div class="status-badge status-@replay.Status.ToString().ToLower()">
                             @replay.Status
                         </div>
-                        @if (replay.Status == UploadStatus.Failed && !string.IsNullOrEmpty(replay.ConflictUrl))
-                        {
-                            <a class="conflict-link" href="@replay.ConflictUrl" target="_blank" @onclick:stopPropagation>View Online</a>
-                        }
                     </div>
                     <div style="display: flex; gap: 0.5rem;" @onclick:stopPropagation>
-                        <button class="btn glass" @onclick="() => UploadReplay(replay)" disabled="@(replay.Status == UploadStatus.Uploading || replay.Status == UploadStatus.Retrying)">
-                            Upload
+                        @if ((replay.Status == UploadStatus.Success || replay.Status == UploadStatus.Conflict) && !string.IsNullOrEmpty(replay.OnlineUrl))
+                        {
+                            <a class="btn btn-primary" href="@replay.OnlineUrl" target="_blank" style="text-decoration: none; display: flex; align-items: center;">
+                                View Replay
+                            </a>
+                        }
+                        else
+                        {
+                            <div style="position: relative;">
+                                <div class="split-button" title="@(IsLimitReached ? "Upload limit reached" : "")">
+                                    <button class="main-btn" @onclick="() => UploadReplay(replay, null)" 
+                                            disabled="@(replay.Status == UploadStatus.Uploading || replay.Status == UploadStatus.Retrying || IsLimitReached)">
+                                        Upload as @(char.ToUpper(Settings.Current.Visibility[0]) + Settings.Current.Visibility.Substring(1))
+                                    </button>
+                                    <button class="dropdown-toggle" @onclick='() => ToggleDropdown($"replay-{replay.FullPath}")'
+                                            disabled="@(replay.Status == UploadStatus.Uploading || replay.Status == UploadStatus.Retrying || IsLimitReached)">
+                                        ▼
+                                    </button>
+                                </div>
+                                @if (ActiveDropdownId == $"replay-{replay.FullPath}")
+                                {
+                                    <div class="dropdown-menu">
+                                        @foreach (var vis in new[] { "public", "private", "unlisted" }.Where(v => v != Settings.Current.Visibility))
+                                        {
+                                            <div class="dropdown-item" @onclick="() => UploadWithVisibility(replay, vis)">
+                                                Upload as @(char.ToUpper(vis[0]) + vis.Substring(1))
+                                            </div>
+                                        }
+                                    </div>
+                                }
+                            </div>
+                        }
+                        <button class="btn glass" @onclick="() => ToggleHideReplay(replay)" title="@(replay.IsHidden ? "Unhide" : "Hide")">
+                            @(replay.IsHidden ? "👁️" : "👁️‍🗨️")
                         </button>
-                        <button class="btn glass" @onclick="() => HideReplay(replay)" title="Hide Replay">×</button>
+                        <button class="btn glass" @onclick="() => RemoveFromList(replay)" title="Remove from list">×</button>
                     </div>
                 </div>
             }
         </div>
 
-        <div class="bottom-bar glass">
-            <div class="auto-upload-status">
-                @if (Settings.Current.AutoUpload)
-                {
-                    <div class="timer">Next check in: <span class="time">@FormatTime(SecondsUntilNextCheck)</span></div>
+        @if (CurrentTab == ListTab.Pending)
+        {
+            <div class="bottom-bar glass">
+                <div class="auto-upload-status">
+                    @if (Settings.Current.AutoUpload)
+                    {
+                        <div class="timer">Next check in: <span class="time">@FormatTime(SecondsUntilNextCheck)</span></div>
+                    }
+                    else
+                    {
+                        <div class="timer disabled">Auto-upload is disabled</div>
+                    }
+                </div>
+                @{
+                    var selectedCount = Monitor.Replays.Count(r => !r.IsHidden && r.IsSelected && r.Status != UploadStatus.Success && r.Status != UploadStatus.Conflict);
                 }
-                else
-                {
-                    <div class="timer disabled">Auto-upload is disabled</div>
-                }
+                <div style="position: relative;" title="@(IsLimitReached ? "Upload limit reached" : "")">
+                    <div class="split-button @(selectedCount == 0 || IsLimitReached ? "disabled" : "")">
+                        <button class="main-btn" @onclick="() => UploadAllSelected(null)" disabled="@(selectedCount == 0 || IsLimitReached)">
+                            Upload Selected (@selectedCount) as @(char.ToUpper(Settings.Current.Visibility[0]) + Settings.Current.Visibility.Substring(1))
+                        </button>
+                        <button class="dropdown-toggle" @onclick='() => ToggleDropdown("bulk-upload")' disabled="@(selectedCount == 0 || IsLimitReached)">
+                            ▼
+                        </button>
+                    </div>
+                    @if (ActiveDropdownId == "bulk-upload" && selectedCount > 0)
+                    {
+                        <div class="dropdown-menu" style="bottom: 100%; margin-bottom: 8px;">
+                            @foreach (var vis in new[] { "public", "private", "unlisted" }.Where(v => v != Settings.Current.Visibility))
+                            {
+                                <div class="dropdown-item" @onclick="() => BulkUploadWithVisibility(vis)">
+                                    Upload Selected as @(char.ToUpper(vis[0]) + vis.Substring(1))
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
             </div>
-            <button class="btn btn-primary" @onclick="UploadAllSelected">Upload Selected Now</button>
-        </div>
+        }
     }
 </div>
 
 <style>
+    .content {
+        padding: 1.5rem;
+    }
+
+    .replay-list {
+        margin-bottom: 100px;
+    }
     .bottom-bar {
         position: fixed;
         bottom: 0;
@@ -130,7 +252,11 @@
         justify-content: space-between;
         align-items: center;
         border-top: 1px solid rgba(255, 255, 255, 0.1);
+        border-left: none;
+        border-right: none;
+        border-bottom: none;
         z-index: 100;
+        border-radius: 12px 12px 0 0;
     }
 
     .timer {
@@ -147,26 +273,85 @@
     .timer.disabled {
         opacity: 0.5;
     }
+
+    .sticky-header {
+        position: sticky;
+        top: -1.5rem;
+        z-index: 1005;
+        background: var(--bg-color);
+        backdrop-filter: blur(20px);
+        margin: -1.5rem -1.5rem 1.5rem -1.5rem;
+        padding: 1.5rem;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .tabs {
+        display: flex;
+        gap: 1rem;
+    }
+
+    .tab-btn {
+        background: transparent;
+        border: none;
+        color: var(--text-secondary);
+        padding: 0.5rem 1rem;
+        cursor: pointer;
+        font-weight: 600;
+        transition: all 0.2s;
+        border-radius: 6px;
+    }
+
+    .tab-btn:hover {
+        color: var(--text-primary);
+        background: rgba(255, 255, 255, 0.05);
+    }
+
+    .tab-btn.active {
+        color: var(--accent-color);
+        background: rgba(56, 189, 248, 0.1);
+    }
+
+    .version {
+        font-size: 0.8rem;
+        font-weight: 400;
+        vertical-align: middle;
+        margin-left: 0.5rem;
+        color: var(--text-secondary);
+        -webkit-text-fill-color: var(--text-secondary);
+    }
+
 </style>
 
 @code {
+    private enum ListTab { Pending, Uploaded, Hidden }
+    private ListTab CurrentTab = ListTab.Pending;
     private bool ShowSettings = false;
-    private bool HideSuccessful = true;
-    private RateLimitInfo? RateInfo;
     private System.Threading.Timer? AppTimer;
     private int SecondsUntilNextCheck = 0;
+    private int SecondsUntilNextStatusCheck = 0;
+    private BallchasingClient.ApiStatus CurrentApiStatus = BallchasingClient.ApiStatus.Unknown;
+    private BallchasingClient.AccountInfo? Account;
+    private DateTime? LastStatusCheck;
+    private string? ApiRetryMessage;
+    private bool HasCheckedStatus = false;
+    private bool ShowApiKey = false;
+    private string? ActiveDropdownId;
 
     protected override void OnInitialized()
     {
         Monitor.ReplaysChanged += () => InvokeAsync(StateHasChanged);
-        Client.RateLimitUpdated += (info) => { RateInfo = info; InvokeAsync(StateHasChanged); };
+        Client.AccountInfoUpdated += (info) => { Account = info; InvokeAsync(StateHasChanged); };
         
         Monitor.OnNewReplayDiscovered += HandleNewReplay;
 
         // Initial configuration
         Client.Configure(Settings.Current.ApiKey, Settings.Current.Visibility);
         ResetTimer();
-        Monitor.StartMonitoring(Settings.Current.ReplayFolder, Settings.Current.PollingInterval);
+        ResetStatusTimer();
+        var baseline = Settings.Current.LastUploadedReplayDate ?? DateTime.Now;
+        Monitor.StartMonitoring(Settings.Current.ReplayFolder, Settings.Current.PollingInterval, baseline, Settings.Current.HiddenFilePaths);
+
+        _ = UpdateApiStatus();
 
         // Global app timer (1s tick)
         AppTimer = new System.Threading.Timer(_ => Tick(), null, 1000, 1000);
@@ -179,16 +364,132 @@
             SecondsUntilNextCheck--;
             if (SecondsUntilNextCheck <= 0)
             {
-                _ = InvokeAsync(RefreshFolder);
+                _ = InvokeAsync(() => RefreshFolder());
                 ResetTimer();
             }
         }
+
+        SecondsUntilNextStatusCheck--;
+        if (SecondsUntilNextStatusCheck <= 0)
+        {
+            _ = InvokeAsync(() => UpdateApiStatus());
+            ResetStatusTimer();
+        }
+
+        // Auto-Delete Logic
+        if (Settings.Current.AutoDeleteEnabled)
+        {
+            var toDelete = Monitor.Replays
+                .Where(r => r.Status == UploadStatus.Success && 
+                            r.UploadTime.HasValue && 
+                            (DateTime.Now - r.UploadTime.Value).TotalMinutes >= Settings.Current.AutoDeleteMinutes)
+                .ToList();
+
+            foreach (var replay in toDelete)
+            {
+                try 
+                { 
+                    if (File.Exists(replay.FullPath)) File.Delete(replay.FullPath); 
+                } catch { }
+                
+                App.Current?.Dispatcher.Invoke(() => 
+                {
+                    Monitor.Replays.Remove(replay);
+                });
+            }
+        }
+
         InvokeAsync(StateHasChanged);
     }
 
     private void ResetTimer()
     {
         SecondsUntilNextCheck = Settings.Current.PollingInterval * 60;
+    }
+
+    private void ResetStatusTimer()
+    {
+        SecondsUntilNextStatusCheck = 4 * 60;
+    }
+
+    private async Task UpdateApiStatus(bool force = false)
+    {
+        if (CurrentApiStatus == BallchasingClient.ApiStatus.Checking) return;
+        
+        // If not forced and checked in the last 10 seconds, skip
+        if (!force && LastStatusCheck.HasValue && (DateTime.Now - LastStatusCheck.Value).TotalSeconds < 10)
+            return;
+
+        CurrentApiStatus = BallchasingClient.ApiStatus.Checking;
+        ApiRetryMessage = null;
+        StateHasChanged();
+
+        CurrentApiStatus = await Client.CheckApiStatusAsync(Settings.Current.ApiKey, (retry) => 
+        {
+            ApiRetryMessage = $"Retry {retry}/3...";
+            InvokeAsync(StateHasChanged);
+        });
+        
+        if (CurrentApiStatus != BallchasingClient.ApiStatus.Valid)
+        {
+            Account = null;
+        }
+
+        HasCheckedStatus = true;
+        ApiRetryMessage = null;
+        LastStatusCheck = DateTime.Now;
+        StateHasChanged();
+    }
+
+    private async Task ManualCheckStatus()
+    {
+        ResetStatusTimer();
+        await UpdateApiStatus(force: true);
+    }
+
+    private string GetStatusText()
+    {
+        return CurrentApiStatus switch
+        {
+            BallchasingClient.ApiStatus.Checking => "Checking...",
+            BallchasingClient.ApiStatus.Valid => "Ballchasing: Online",
+            BallchasingClient.ApiStatus.Invalid => "Ballchasing: Invalid API Key",
+            BallchasingClient.ApiStatus.ServerError => "Ballchasing: Server Error",
+            _ => "Ballchasing: Unknown"
+        };
+    }
+
+    private string GetStatusColorClass()
+    {
+        return CurrentApiStatus switch
+        {
+            BallchasingClient.ApiStatus.Checking => "blue",
+            BallchasingClient.ApiStatus.Valid => "green",
+            BallchasingClient.ApiStatus.Invalid => "red",
+            BallchasingClient.ApiStatus.ServerError => "yellow",
+            _ => ""
+        };
+    }
+
+    private string GetInputStatusClass()
+    {
+        return CurrentApiStatus switch
+        {
+            BallchasingClient.ApiStatus.Checking => "input-status-checking",
+            BallchasingClient.ApiStatus.Valid => "input-status-valid",
+            BallchasingClient.ApiStatus.Invalid => "input-status-invalid",
+            BallchasingClient.ApiStatus.ServerError => "input-status-error",
+            _ => ""
+        };
+    }
+
+    private string GetLastCheckedString()
+    {
+        if (!LastStatusCheck.HasValue) return "";
+        var diff = DateTime.Now - LastStatusCheck.Value;
+        var mins = (int)Math.Round(diff.TotalMinutes);
+        if (mins <= 0) return "just now";
+        return $"{mins}m ago";
     }
 
     private string FormatTime(int totalSeconds)
@@ -201,40 +502,55 @@
 
     private void HandleNewReplay(ReplayFile replay)
     {
-        if (Settings.Current.AutoUpload && !IsHidden(replay))
+        if (Settings.Current.AutoUpload && !replay.IsHidden)
         {
             _ = InvokeAsync(() => UploadReplay(replay));
         }
     }
 
-    private bool IsHidden(ReplayFile replay) => Settings.Current.HiddenReplays.Contains(replay.FullPath);
-
-    private bool IsAutoHidden(ReplayFile replay)
+    private void ToggleDropdown(string id)
     {
-        if (!HideSuccessful || replay.Status != UploadStatus.Success || replay.UploadTime == null) return false;
-        return (DateTime.Now - replay.UploadTime.Value).TotalHours >= 3;
+        if (ActiveDropdownId == id) ActiveDropdownId = null;
+        else ActiveDropdownId = id;
     }
+
+    private async Task UploadWithVisibility(ReplayFile replay, string visibility)
+    {
+        ActiveDropdownId = null;
+        await UploadReplay(replay, visibility);
+    }
+
+    private async Task BulkUploadWithVisibility(string visibility)
+    {
+        ActiveDropdownId = null;
+        await UploadAllSelected(visibility);
+    }
+
+    private bool IsLimitReached => (Account != null) && 
+        ((!Account.Quota.Day.IsUnlimited && Account.Quota.Day.Used >= Account.Quota.Day.Max) ||
+         (!Account.Quota.Week.IsUnlimited && Account.Quota.Week.Used >= Account.Quota.Week.Max));
 
     private void ToggleSelection(ReplayFile replay)
     {
         replay.IsSelected = !replay.IsSelected;
     }
 
-    private void HideReplay(ReplayFile replay)
+    private void ToggleHideReplay(ReplayFile replay)
     {
-        if (!Settings.Current.HiddenReplays.Contains(replay.FullPath))
-        {
-            Settings.Current.HiddenReplays.Add(replay.FullPath);
-            Settings.Save();
-        }
+        replay.IsHidden = !replay.IsHidden;
+        if (replay.IsHidden)
+            Settings.Current.HiddenFilePaths.Add(replay.FullPath);
+        else
+            Settings.Current.HiddenFilePaths.Remove(replay.FullPath);
+        
+        Settings.Save();
+        StateHasChanged();
     }
 
-    private void HideAllSelected()
+    private void RemoveFromList(ReplayFile replay)
     {
-        foreach (var replay in Monitor.Replays.Where(r => r.IsSelected))
-        {
-            HideReplay(replay);
-        }
+        Monitor.Replays.Remove(replay);
+        StateHasChanged();
     }
 
     private void ManualAddReplay()
@@ -242,61 +558,70 @@
         var dialog = new Microsoft.Win32.OpenFileDialog
         {
             Filter = "Rocket League Replays (*.replay)|*.replay",
-            Title = "Select Replay File"
+            Title = "Select Replay File(s)",
+            Multiselect = true
         };
 
         if (dialog.ShowDialog() == true)
         {
-            var sourcePath = dialog.FileName;
-            var destPath = Path.Combine(Settings.Current.ReplayFolder, Path.GetFileName(sourcePath));
-
-            try
+            foreach (var sourcePath in dialog.FileNames)
             {
-                // If the file was hidden, unhide it
-                if (Settings.Current.HiddenReplays.Contains(destPath))
-                {
-                    Settings.Current.HiddenReplays.Remove(destPath);
-                    Settings.Save();
-                }
+                var destPath = Path.Combine(Settings.Current.ReplayFolder, Path.GetFileName(sourcePath));
 
-                if (sourcePath != destPath)
+                try
                 {
-                    File.Copy(sourcePath, destPath, true);
+                    if (sourcePath != destPath)
+                    {
+                        File.Copy(sourcePath, destPath, true);
+                    }
+                    Monitor.ForceAddReplay(destPath);
                 }
-                
-                RefreshFolder();
+                catch (Exception ex)
+                {
+                    App.Current?.Dispatcher.Invoke(() => System.Windows.MessageBox.Show($"Failed to add replay {Path.GetFileName(sourcePath)}: {ex.Message}"));
+                }
             }
-            catch (Exception ex)
-            {
-                App.Current?.Dispatcher.Invoke(() => System.Windows.MessageBox.Show($"Failed to add replay: {ex.Message}"));
-            }
+            RefreshFolder();
         }
     }
 
     private void ToggleSettings() => ShowSettings = !ShowSettings;
 
-    private void SaveSettings()
+    private async Task SaveSettings()
     {
         Settings.Save();
         Client.Configure(Settings.Current.ApiKey, Settings.Current.Visibility);
         ResetTimer();
-        Monitor.StartMonitoring(Settings.Current.ReplayFolder, Settings.Current.PollingInterval);
+        var baseline = Settings.Current.LastUploadedReplayDate ?? DateTime.Now;
+        Monitor.StartMonitoring(Settings.Current.ReplayFolder, Settings.Current.PollingInterval, baseline, Settings.Current.HiddenFilePaths);
+        await UpdateApiStatus();
         ShowSettings = false;
     }
 
     private void RefreshFolder()
     {
-        Monitor.StartMonitoring(Settings.Current.ReplayFolder, Settings.Current.PollingInterval);
+        var baseline = Settings.Current.LastUploadedReplayDate ?? DateTime.Now;
+        Monitor.StartMonitoring(Settings.Current.ReplayFolder, Settings.Current.PollingInterval, baseline, Settings.Current.HiddenFilePaths);
     }
 
-    private async Task UploadReplay(ReplayFile replay)
+    private async Task UploadReplay(ReplayFile replay, string? visibility = null)
     {
         if (replay.Status == UploadStatus.Uploading || replay.Status == UploadStatus.Retrying) return;
+
+        // Check API status before uploading
+        await UpdateApiStatus();
+        if (CurrentApiStatus != BallchasingClient.ApiStatus.Valid)
+        {
+            replay.Status = UploadStatus.Failed;
+            replay.Message = "Ballchasing API is not available or API key is invalid.";
+            StateHasChanged();
+            return;
+        }
 
         replay.Status = UploadStatus.Uploading;
         StateHasChanged();
 
-        var result = await Client.UploadReplayAsync(replay.FullPath, (retry) => 
+        var result = await Client.UploadReplayAsync(replay.FullPath, visibility, (retry) => 
         {
             replay.Status = UploadStatus.Retrying;
             replay.Message = $"Retrying ({retry}/3)...";
@@ -307,25 +632,49 @@
         {
             replay.Status = UploadStatus.Success;
             replay.UploadTime = DateTime.Now;
-            try { File.Delete(replay.FullPath); } catch { }
+            replay.OnlineUrl = result.Location;
+            
+            // Update baseline date in settings
+            if (!Settings.Current.LastUploadedReplayDate.HasValue || replay.DateCreated > Settings.Current.LastUploadedReplayDate.Value)
+            {
+                Settings.Current.LastUploadedReplayDate = replay.DateCreated;
+                Settings.Save();
+            }
+
+            _ = UpdateApiStatus(); // Update quota after success
         }
         else
         {
-            replay.Status = UploadStatus.Failed;
+            if (result.Message == "Replay already exists.")
+            {
+                replay.Status = UploadStatus.Conflict;
+                replay.OnlineUrl = result.Location;
+            }
+            else
+            {
+                replay.Status = UploadStatus.Failed;
+            }
             replay.Message = result.Message;
-            replay.ConflictUrl = result.Location;
         }
         
         StateHasChanged();
     }
 
-    private async Task UploadAllSelected()
+    private async Task UploadAllSelected(string? visibility = null)
     {
         ResetTimer(); // Reset timer when manual upload is triggered
-        var toUpload = Monitor.Replays.Where(r => r.IsSelected && r.Status != UploadStatus.Success).ToList();
+        
+        await UpdateApiStatus();
+        if (CurrentApiStatus != BallchasingClient.ApiStatus.Valid)
+        {
+            App.Current?.Dispatcher.Invoke(() => System.Windows.MessageBox.Show("Cannot upload: Ballchasing API is not available or API key is invalid."));
+            return;
+        }
+
+        var toUpload = Monitor.Replays.Where(r => !r.IsHidden && r.IsSelected && r.Status != UploadStatus.Success && r.Status != UploadStatus.Conflict).ToList();
         foreach (var replay in toUpload)
         {
-            await UploadReplay(replay);
+            await UploadReplay(replay, visibility);
         }
     }
 }

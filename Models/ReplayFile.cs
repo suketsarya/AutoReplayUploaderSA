@@ -7,7 +7,8 @@ public enum UploadStatus
     Success,
     Failed,
     Excluded,
-    Retrying
+    Retrying,
+    Conflict
 }
 
 public class ReplayFile
@@ -17,8 +18,9 @@ public class ReplayFile
     public DateTime DateCreated { get; set; }
     public UploadStatus Status { get; set; } = UploadStatus.Pending;
     public string Message { get; set; } = string.Empty;
-    public bool IsSelected { get; set; } = true;
+    public bool IsSelected { get; set; } = false;
     public bool IsHidden { get; set; } = false;
     public DateTime? UploadTime { get; set; }
     public string? ConflictUrl { get; set; }
+    public string? OnlineUrl { get; set; }
 }

@@ -6,7 +6,22 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
+    <DefaultItemExcludes>$(DefaultItemExcludes);SuketAutoReplayUploader.Tests\**</DefaultItemExcludes>
+    
+    <Version>0.1.0</Version>
+    <AssemblyVersion>0.1.0.0</AssemblyVersion>
+    <FileVersion>0.1.0.0</FileVersion>
+    <Authors>Suket</Authors>
+    <Product>AutoReplayUploaderSA</Product>
+    <Description>A modern standalone Rocket League replay uploader for Ballchasing.com</Description>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Remove="SuketAutoReplayUploader.Tests\**" />
+    <EmbeddedResource Remove="SuketAutoReplayUploader.Tests\**" />
+    <None Remove="SuketAutoReplayUploader.Tests\**" />
+    <Content Remove="SuketAutoReplayUploader.Tests\**" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Components.WebView.Wpf" Version="10.0.60" />

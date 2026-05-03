@@ -6,7 +6,7 @@
         xmlns:blazor="clr-namespace:Microsoft.AspNetCore.Components.WebView.Wpf;assembly=Microsoft.AspNetCore.Components.WebView.Wpf"
         xmlns:local="clr-namespace:SuketAutoReplayUploader.Components"
         mc:Ignorable="d"
-        Title="Suket AutoReplayUploader" Height="700" Width="900"
+        Title="AutoReplayUploaderSA" Height="700" Width="950" MinWidth="950"
         Background="#0f172a" WindowStartupLocation="CenterScreen">
     <Grid>
         <blazor:BlazorWebView HostPage="wwwroot/index.html" Services="{Binding Services, Source={x:Static Application.Current}}">

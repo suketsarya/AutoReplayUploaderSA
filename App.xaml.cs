@@ -16,8 +16,8 @@ namespace SuketAutoReplayUploader
             
             // Register our services
             serviceCollection.AddSingleton<SettingsService>();
-            serviceCollection.AddSingleton<BallchasingClient>();
-            serviceCollection.AddSingleton<ReplayMonitorService>();
+            serviceCollection.AddSingleton<IBallchasingClient, BallchasingClient>();
+            serviceCollection.AddSingleton<IReplayMonitorService, ReplayMonitorService>();
 
             Services = serviceCollection.BuildServiceProvider();
         }

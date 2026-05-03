@@ -10,20 +10,32 @@ public class AppSettings
     public string ReplayFolder { get; set; } = string.Empty;
     public int PollingInterval { get; set; } = 5;
     public bool AutoUpload { get; set; } = false;
-    public List<string> HiddenReplays { get; set; } = new();
+    public bool AutoDeleteEnabled { get; set; } = false;
+    public int AutoDeleteMinutes { get; set; } = 180;
+    public DateTime? LastUploadedReplayDate { get; set; }
+    public HashSet<string> HiddenFilePaths { get; set; } = new();
 }
 
 public class SettingsService
 {
     private readonly string _filePath;
     public AppSettings Current { get; private set; }
-
-    public SettingsService()
+    private readonly string _defaultFolder;
+    
+    public SettingsService(string? filePath = null)
     {
-        var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-        var folder = Path.Combine(appData, "SuketAutoReplayUploader");
-        Directory.CreateDirectory(folder);
-        _filePath = Path.Combine(folder, "settings.json");
+        if (filePath != null)
+        {
+            _filePath = filePath;
+            _defaultFolder = Path.GetDirectoryName(filePath) ?? "";
+        }
+        else
+        {
+            var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            _defaultFolder = Path.Combine(appData, "SuketAutoReplayUploader");
+            Directory.CreateDirectory(_defaultFolder);
+            _filePath = Path.Combine(_defaultFolder, "settings.json");
+        }
 
         Current = Load();
         
