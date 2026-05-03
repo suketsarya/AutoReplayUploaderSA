@@ -73,7 +73,7 @@ jobs:
         dotnet-version: '10.0.x'
 
     - name: Publish
-      run: dotnet publish SuketAutoReplayUploader.csproj -p:PublishProfile=Properties/PublishProfiles/SingleFileProfile.pubxml
+      run: dotnet publish SuketAutoReplayUploader.csproj -p:PublishProfile=Properties/PublishProfiles/SingleFileProfile.pubxml -o publish_output
 
     - name: Generate Installer Script
       shell: pwsh
@@ -100,7 +100,7 @@ jobs:
         Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
         [Files]
-        Source: "bin\Release\net10.0-windows\publish\win-x64\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+        Source: "publish_output\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
         [Icons]
         Name: "{group}\sushiAutoReplayUploader"; Filename: "{app}\SuketAutoReplayUploader.exe"
