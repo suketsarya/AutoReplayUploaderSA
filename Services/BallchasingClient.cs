@@ -28,8 +28,6 @@ public class BallchasingClient : IBallchasingClient
         _httpClient = new HttpClient();
     }
 
-    public string GetMapName(string code) => _maps.TryGetValue(code, out var name) ? name : code;
-
     public void Configure(string apiKey, string visibility)
     {
         _apiKey = apiKey?.Trim();
