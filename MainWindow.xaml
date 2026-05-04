@@ -6,7 +6,7 @@
         xmlns:blazor="clr-namespace:Microsoft.AspNetCore.Components.WebView.Wpf;assembly=Microsoft.AspNetCore.Components.WebView.Wpf"
         xmlns:local="clr-namespace:SuketAutoReplayUploader.Components"
         mc:Ignorable="d"
-        Title="sushiAutoReplayUploader" Height="700" Width="950" MinWidth="950"
+        Title="sushiAutoReplayUploader" Height="700" Width="980" MinWidth="980"
         Background="#0f172a" WindowStartupLocation="CenterScreen">
     <Grid>
         <blazor:BlazorWebView HostPage="wwwroot/index.html" Services="{Binding Services, Source={x:Static Application.Current}}">

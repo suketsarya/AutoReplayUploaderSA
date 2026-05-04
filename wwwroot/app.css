@@ -16,7 +16,7 @@ body {
     color: var(--text-primary);
     font-family: 'Inter', system-ui, -apple-system, sans-serif;
     overflow: hidden;
-    min-width: 950px;
+    min-width: 980px;
 }
 
 #app {
